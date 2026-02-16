@@ -55,6 +55,14 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "watchparty-backend" });
 });
 
+app.get("/", (_req, res) => {
+  res.json({
+    status: "ok",
+    service: "watchparty-backend",
+    message: "Backend is running. Use /health and /api/* endpoints.",
+  });
+});
+
 app.get("/api/youtube/search", async (req, res) => {
   const q = String(req.query.q || "").trim();
   if (!q) {
