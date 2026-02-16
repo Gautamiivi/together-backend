@@ -38,14 +38,14 @@ const app = express();
 const httpServer = createServer(app);
 
 const PORT = process.env.PORT || 4000;
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "*";
+const FRONTEND_ORIGIN = normalizeOrigin(process.env.FRONTEND_ORIGIN || "*");
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const ROOM_CODE_LENGTH = 6;
 const ROOM_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 app.use(
   cors({
-    origin: FRONTEND_ORIGIN === "*" ? true : FRONTEND_ORIGIN,
+    origin: FRONTEND_ORIGIN === "*" ? true : [FRONTEND_ORIGIN, `${FRONTEND_ORIGIN}/`],
     credentials: true,
   })
 );
@@ -185,7 +185,7 @@ function mapYouTubeItems(items) {
 
 const io = new Server(httpServer, {
   cors: {
-    origin: FRONTEND_ORIGIN === "*" ? true : FRONTEND_ORIGIN,
+    origin: FRONTEND_ORIGIN === "*" ? true : [FRONTEND_ORIGIN, `${FRONTEND_ORIGIN}/`],
     credentials: true,
   },
 });
@@ -204,6 +204,12 @@ function getOrCreateRoom(roomCode) {
     });
   }
   return rooms.get(roomCode);
+}
+
+function normalizeOrigin(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "*") return "*";
+  return text.replace(/\/+$/, "");
 }
 
 function normalizeRoomCode(value) {
