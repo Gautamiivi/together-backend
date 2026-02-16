@@ -197,6 +197,7 @@ function getOrCreateRoom(roomCode) {
   if (!rooms.has(roomCode)) {
     rooms.set(roomCode, {
       roomCode,
+      ownerSocketId: null,
       videoId: "dQw4w9WgXcQ",
       isPlaying: false,
       currentTime: 0,
@@ -316,9 +317,13 @@ io.on("connection", (socket) => {
     socket.join(normalizedCode);
 
     const state = getOrCreateRoom(normalizedCode);
+    if (!state.ownerSocketId) {
+      state.ownerSocketId = socket.id;
+    }
 
     socket.emit("room-state", {
       roomCode: normalizedCode,
+      isHost: state.ownerSocketId === socket.id,
       videoId: state.videoId,
       ...buildSyncPayload(state),
       chat: state.chat.slice(-50),
@@ -328,6 +333,61 @@ io.on("connection", (socket) => {
       text: `${cleanName} joined`,
       at: Date.now(),
     });
+  });
+
+  socket.on("exit-room", () => {
+    const { roomCode, username } = socket.data;
+    if (!roomCode || !username) return;
+
+    const state = rooms.get(roomCode);
+    socket.leave(roomCode);
+    socket.data.roomCode = undefined;
+
+    if (state && state.ownerSocketId === socket.id) {
+      const members = Array.from(io.sockets.adapter.rooms.get(roomCode) || []);
+      state.ownerSocketId = members[0] || null;
+      io.to(roomCode).emit("room-owner-changed", {
+        ownerSocketId: state.ownerSocketId,
+      });
+    }
+
+    socket.emit("room-exited", { roomCode });
+    io.to(roomCode).emit("system-message", {
+      text: `${username} left`,
+      at: Date.now(),
+    });
+  });
+
+  socket.on("terminate-room", () => {
+    const { roomCode, username } = socket.data;
+    if (!roomCode || !username) return;
+
+    const state = rooms.get(roomCode);
+    if (!state) {
+      socket.emit("action-error", { message: "Room not found" });
+      return;
+    }
+
+    if (state.ownerSocketId && state.ownerSocketId !== socket.id) {
+      socket.emit("action-error", { message: "Only room host can terminate room" });
+      return;
+    }
+
+    const members = Array.from(io.sockets.adapter.rooms.get(roomCode) || []);
+    io.to(roomCode).emit("room-terminated", {
+      roomCode,
+      by: username,
+      at: Date.now(),
+    });
+
+    for (const id of members) {
+      const memberSocket = io.sockets.sockets.get(id);
+      if (!memberSocket) continue;
+      memberSocket.leave(roomCode);
+      memberSocket.data.roomCode = undefined;
+    }
+
+    rooms.delete(roomCode);
   });
 
   socket.on("set-video", ({ videoId }) => {
@@ -409,6 +469,15 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const { roomCode, username } = socket.data;
     if (!roomCode || !username) return;
+
+    const state = rooms.get(roomCode);
+    if (state && state.ownerSocketId === socket.id) {
+      const members = Array.from(io.sockets.adapter.rooms.get(roomCode) || []);
+      state.ownerSocketId = members[0] || null;
+      io.to(roomCode).emit("room-owner-changed", {
+        ownerSocketId: state.ownerSocketId,
+      });
+    }
 
     io.to(roomCode).emit("system-message", {
       text: `${username} left`,
