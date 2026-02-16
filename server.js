@@ -42,6 +42,7 @@ const FRONTEND_ORIGIN = normalizeOrigin(process.env.FRONTEND_ORIGIN || "*");
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const ROOM_CODE_LENGTH = 6;
 const ROOM_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const SYNC_BROADCAST_INTERVAL_MS = 2500;
 
 app.use(
   cors({
@@ -247,6 +248,14 @@ function getSyncedTime(state) {
   return state.currentTime + elapsed;
 }
 
+function buildSyncPayload(state) {
+  return {
+    isPlaying: state.isPlaying,
+    currentTime: getSyncedTime(state),
+    serverNow: Date.now(),
+  };
+}
+
 app.post("/api/rooms/create", (req, res) => {
   try {
     const roomCode = getUniqueRoomCode();
@@ -311,8 +320,7 @@ io.on("connection", (socket) => {
     socket.emit("room-state", {
       roomCode: normalizedCode,
       videoId: state.videoId,
-      isPlaying: state.isPlaying,
-      currentTime: getSyncedTime(state),
+      ...buildSyncPayload(state),
       chat: state.chat.slice(-50),
     });
 
@@ -349,8 +357,7 @@ io.on("connection", (socket) => {
     state.lastUpdatedAt = Date.now();
 
     socket.to(roomCode).emit("sync-play", {
-      currentTime: state.currentTime,
-      at: state.lastUpdatedAt,
+      ...buildSyncPayload(state),
     });
   });
 
@@ -364,8 +371,7 @@ io.on("connection", (socket) => {
     state.lastUpdatedAt = Date.now();
 
     socket.to(roomCode).emit("sync-pause", {
-      currentTime: state.currentTime,
-      at: state.lastUpdatedAt,
+      ...buildSyncPayload(state),
     });
   });
 
@@ -378,8 +384,7 @@ io.on("connection", (socket) => {
     state.lastUpdatedAt = Date.now();
 
     socket.to(roomCode).emit("sync-seek", {
-      currentTime: state.currentTime,
-      at: state.lastUpdatedAt,
+      ...buildSyncPayload(state),
     });
   });
 
@@ -411,6 +416,12 @@ io.on("connection", (socket) => {
     });
   });
 });
+
+setInterval(() => {
+  for (const [roomCode, state] of rooms.entries()) {
+    io.to(roomCode).emit("sync-state", buildSyncPayload(state));
+  }
+}, SYNC_BROADCAST_INTERVAL_MS);
 
 httpServer.listen(PORT, () => {
   console.log(`watchparty backend running on ${PORT}`);
